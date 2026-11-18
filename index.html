@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>救救孩子的選課系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#F8F9FA] p-4 md:p-8">
+    <div class="max-w-6xl mx-auto">
+        <div class="flex justify-between items-center mb-6 bg-white p-4 rounded-lg shadow-sm">
+            <h1 class="text-3xl font-bold text-blue-600">課表ouo</h1>
+            <div class="text-right">
+                <p class="text-3x1 text-gray-500">當前總學分</p>
+                <p class="text-xl font-mono font-bold text-orange-500"><span id="currentCredits">0</span> / <span class="text-gray-400 text-base">25</span></p>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto bg-white rounded-xl shadow-lg">
+            <table class="w-full border-collapse min-w-[600px]">
+                <thead>
+                    <tr class="bg-[#5B7083] text-white">
+                        <th class="border p-3 w-16 text-white">節次</th>
+                        <th class="border p-3 text-white">週一</th>
+                        <th class="border p-3 text-white">週二</th>
+                        <th class="border p-3 text-white">週三</th>
+                        <th class="border p-3 text-white">週四</th>
+                        <th class="border p-3 text-white">週五</th>
+                    </tr>
+                </thead>
+                <tbody id="courseTbody"></tbody>
+            </table>
+        </div>
+
+        <p class="mt-5 text-x1 text-gray-400 text-center">提示：點擊課表中的「+ 加選」即可在側邊欄查看該時段所有可選課程，選課請三思後行，不然期中期末會想搧死自己</p>
+    </div>
+
+    <!-- 側邊欄與遮罩 -->
+    <div id="sidebarOverlay" class="fixed inset-0 bg-black/40 hidden z-40">
+        <div id="courseSidebar" class="absolute right-0 top-0 h-full w-full max-w-xl bg-white shadow-xl transform translate-x-full transition-transform duration-400 ease-out flex flex-col">
+            <div class="flex items-center justify-between px-4 py-3 border-b">
+                <div>
+                    <p class="text-3x1 text-gray-400">加選課程</p>
+                    <h2 id="sidebarTitle" class="text-2xl font-bold text-gray-800">時段資訊</h2>
+                </div>
+                <button id="sidebarCloseBtn" class="text-gray-400 hover:text-gray-600 text-xl leading-none" type="button">&times;</button>
+            </div>
+            <div class="px-4 py-3 border-b">
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                        <p class="text-[16px] font-medium text-gray-600">系所過濾</p>
+                        <div class="space-x-2">
+                            <button id="deptSelectAllBtn" type="button" class="px-2 py-0.5 text-[16px] rounded border border-blue-200 text-blue-700 hover:bg-blue-50">全選</button>
+                            <button id="deptClearAllBtn" type="button" class="px-2 py-0.5 text-[16px] rounded border border-gray-200 text-gray-600 hover:bg-gray-50">全不選</button>
+                        </div>
+                    </div>
+                    <div id="deptFilterContainer" class="mt-1 grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-lg text-gray-700">
+                        <!-- 動態插入系所 Checkbox -->
+                    </div>
+                </div>
+                <hr class="my-3 border-gray-200" />
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                        <p class="text-[16px] font-medium text-gray-600">課程過濾</p>
+                        <div class="space-x-2">
+                            <button id="courseSelectAllBtn" type="button" class="px-2 py-0.5 text-[16px] rounded border border-blue-200 text-blue-700 hover:bg-blue-50">全選</button>
+                            <button id="courseClearAllBtn" type="button" class="px-2 py-0.5 text-[16px] rounded border border-gray-200 text-gray-600 hover:bg-gray-50">全不選</button>
+                        </div>
+                    </div>
+                    <div id="courseFilterContainer" class="mt-1 flex flex-wrap gap-2">
+                        <!-- 動態插入課程類型 Checkbox 標籤 -->
+                    </div>
+                </div>
+            </div>
+            <div id="sidebarCourseList" class="flex-1 overflow-y-auto px-3 py-2 space-y-3">
+                <!-- 動態插入課程卡片 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Google 試算表串接（只填 ID 即可）
+        const SPREADSHEET_ID_OR_URL = "1wYZD3eYlX5MELUuCkXK-Pity3ark4UtEhVzlOo0H11U";
+        // 系所清單（同時對應 Google Sheet 的分頁名稱）
+        const DEPARTMENTS = [
+            "不分系", "語教系", "區社系", "諮心系", "音樂系", "其他",
+            "英語系", "數教系", "科教系", "資工系", "數位系", "國企系","虛擬學制"
+        ];
+
+        //更改輔系雙主修顏色在這裡
+        const PERIOD_START = 1;
+        const PERIOD_END = 11;
+        const PERIOD_ROW_HEIGHT = 96; // 對應 tailwind h-24（6rem）
+        const REMARK_UNDERLINE_COLORS = {
+            "輔系": "#9580d4",
+            "雙主修": "#ffd88e",
+            "領域專長": "#75e2e0",
+            "x": "#f0a599",
+        };
+        const COURSE_FILTER_TYPES = [
+            { key: "輔系", color: REMARK_UNDERLINE_COLORS["輔系"] },
+            { key: "雙主修", color: REMARK_UNDERLINE_COLORS["雙主修"] },
+            { key: "領域專長", color: REMARK_UNDERLINE_COLORS["領域專長"] },
+            { key: "x", color: "#f0a599" },
+        ];
+        const COURSE_FILTER_KEYS = COURSE_FILTER_TYPES.map(t => t.key);
+        const DAYS = [
+            { key: 1, label: "週一" },
+            { key: 2, label: "週二" },
+            { key: 3, label: "週三" },
+            { key: 4, label: "週四" },
+            { key: 5, label: "週五" },
+        ];
+
+        let allCourses = [];
+        let selectedCourses = [];
+        let currentSidebarDayKey = null;
+        let currentSidebarPeriod = null;
+        let activeDeptFilter = new Set(DEPARTMENTS);
+        let activeCourseFilter = new Set(COURSE_FILTER_KEYS);
+
+        function hexToRgba(hex, alpha) {
+            const h = String(hex).replace("#", "");
+            const r = parseInt(h.slice(0, 2), 16);
+            const g = parseInt(h.slice(2, 4), 16);
+            const b = parseInt(h.slice(4, 6), 16);
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+
+        function getCourseFilterCategories(course) {
+            const tags = parseRemarkTags(course.remark).map(t => t.label);
+            const cats = [];
+            if (tags.includes("輔系")) cats.push("輔系");
+            if (tags.includes("雙主修")) cats.push("雙主修");
+            if (tags.includes("領域專長")) cats.push("領域專長");
+            if (!cats.length) cats.push("x");
+            return cats;
+        }
+
+        function courseMatchesCourseFilter(course) {
+            if (activeCourseFilter.size === 0) return false;
+            const cats = getCourseFilterCategories(course);
+            return cats.some(c => activeCourseFilter.has(c));
+        }
+
+        function parseRemarkTags(remark) {
+            const text = String(remark ?? "").trim();
+            if (!text) return [];
+
+            const tags = [];
+            const seen = new Set();
+            const parts = text.split(/[/／、,，|]/).map(s => s.trim()).filter(Boolean);
+            const candidates = parts.length ? parts : [text];
+
+            for (const part of candidates) {
+                const color = REMARK_UNDERLINE_COLORS[part];
+                if (color && !seen.has(part)) {
+                    seen.add(part);
+                    tags.push({ label: part, color });
+                }
+            }
+
+            if (!tags.length) {
+                const keys = Object.keys(REMARK_UNDERLINE_COLORS).sort((a, b) => b.length - a.length);
+                for (const key of keys) {
+                    if (text.includes(key) && !seen.has(key)) {
+                        seen.add(key);
+                        tags.push({ label: key, color: REMARK_UNDERLINE_COLORS[key] });
+                    }
+                }
+            }
+            return tags;
+        }
+
+        /** 備註色條：左側等寬直線（不撐大課表/卡片外框） */
+        function applyRemarkMarkers(container, remark, contentEl) {
+            const tags = parseRemarkTags(remark);
+            if (!tags.length) return false;
+
+            const LINE_W = 9;  // 約為原本 3px 的 3 倍
+            const GAP = 2;
+            const stripWidth = tags.length * LINE_W + Math.max(0, tags.length - 1) * GAP;
+
+            const strip = document.createElement("div");
+            strip.className = "absolute left-0 top-0 bottom-0 flex flex-row pointer-events-none z-0";
+            strip.setAttribute("aria-hidden", "true");
+
+            tags.forEach((tag, i) => {
+                const line = document.createElement("div");
+                line.style.width = `${LINE_W}px`;
+                line.style.height = "100%";
+                line.style.backgroundColor = tag.color;
+                line.style.flexShrink = "0";
+                if (i === 0) line.style.borderTopLeftRadius = "0.75rem";
+                if (i === tags.length - 1) line.style.borderBottomLeftRadius = "0.75rem";
+                strip.appendChild(line);
+                if (i < tags.length - 1) {
+                    const gap = document.createElement("div");
+                    gap.style.width = `${GAP}px`;
+                    gap.style.flexShrink = "0";
+                    strip.appendChild(gap);
+                }
+            });
+
+            container.appendChild(strip);
+            if (contentEl) contentEl.style.marginLeft = `${stripWidth}px`;
+            return true;
+        }
+
+        function addPickButton(dayKey, period) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "w-full h-full border-2 border-dashed border-gray-200 hover:border-blue-300 rounded flex items-center justify-center text-gray-400 hover:text-blue-400 transition";
+            btn.textContent = "+ 加選";
+            btn.addEventListener("click", () => {
+                openSidebar(dayKey, period);
+            });
+            return btn;
+        }
+
+        function dayToKey(raw) {
+            const v = String(raw ?? "").trim();
+            const map = {
+                "1": 1, "一": 1, "週一": 1, "周一": 1, "星期一": 1,
+                "2": 2, "二": 2, "週二": 2, "周二": 2, "星期二": 2,
+                "3": 3, "三": 3, "週三": 3, "周三": 3, "星期三": 3,
+                "4": 4, "四": 4, "週四": 4, "周四": 4, "星期四": 4,
+                "5": 5, "五": 5, "週五": 5, "周五": 5, "星期五": 5,
+            };
+            return map[v] ?? null;
+        }
+
+        function toInt(v, fallback = 0) {
+            const n = Number(String(v ?? "").trim());
+            return Number.isFinite(n) ? Math.trunc(n) : fallback;
+        }
+
+        // 依節次回傳對應的上課時間字串（支援第 1～10 節）
+        function getPeriodTime(period) {
+            const map = {
+                1: "08:10-09:00",
+                2: "09:10-10:00",
+                3: "10:20-11:10",
+                4: "11:20-12:10",
+                5: "12:20-13:10",
+                6: "13:30-14:20",
+                7: "14:30-15:20",
+                8: "15:40-16:30",
+                9: "16:40-17:30",
+                10: "17:40-18:30",
+                11: "18:40-19:25"
+            };
+            return map[period] || "";
+        }
+
+        function parseGvizJson(text) {
+            // gviz 會回傳形如：google.visualization.Query.setResponse({...});
+            const start = text.indexOf("{");
+            const end = text.lastIndexOf("}");
+            if (start === -1 || end === -1 || end <= start) return null;
+            try {
+                return JSON.parse(text.slice(start, end + 1));
+            } catch {
+                return null;
+            }
+        }
+
+        function gvizTableToRows(gviz) {
+            const table = gviz?.table;
+            if (!table?.cols?.length || !table?.rows?.length) return [];
+
+            const headers = table.cols.map(c => (c?.label ?? "").trim());
+            return table.rows.map(r => {
+                const obj = {};
+                r.c.forEach((cell, i) => {
+                    const key = headers[i] || `col${i}`;
+                    obj[key] = cell?.v ?? "";
+                });
+                return obj;
+            });
+        }
+
+        async function fetchSheetRows(spreadsheetId, sheetName) {
+            const id = String(spreadsheetId ?? "").trim();
+            if (!id) throw new Error("試算表 ID 不可為空");
+            const sheetId = String(sheetName ?? "").trim();
+            const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetId)}`;
+            console.log("即將抓取試算表分頁：", url);
+            const res = await fetch(url, { cache: "no-store" });
+            if (!res.ok) throw new Error(`讀取試算表失敗：HTTP ${res.status}`);
+            const text = await res.text();
+            const gviz = parseGvizJson(text);
+            if (!gviz) throw new Error("試算表回傳格式不是可解析的 gviz JSON");
+            return gvizTableToRows(gviz);
+        }
+
+        function normalizeCourse(raw, idx, deptNameFromSheet) {
+            const dayKey = dayToKey(raw["星期"]);
+            const start = toInt(raw["開始節次"], NaN);
+            const span = Math.max(1, toInt(raw["節數"], 1));
+            // 學分改用 parseFloat，支援 0.5 等小數學分
+            const credit = parseFloat(String(raw["學分"] ?? "0")) || 0;
+            const title = raw["課程名稱"] || raw["課名"] || raw["名稱"] || "未命名課程";
+            const deptFromRow = raw["系所"] || raw["開課系所"] || "";
+            const deptName = deptNameFromSheet || deptFromRow || "";
+            const teacher = raw["老師"] || raw["授課教師"] || raw["教師"] || "";
+            const place = raw["地點"] || raw["教室"] || raw["教室地點"] || "";
+            const subjectCode = String(raw["科目代碼"] ?? "").trim();
+            const gradeLevel = String(raw["開課年級"] ?? raw["年級"] ?? "").trim();
+            const remark = String(raw["備註"] ?? "").trim();
+            console.log("課程代碼讀取確認：", title, "→", subjectCode || "(未讀到)");
+            // 定義每節課的時間 (第 1 節到第 11 節)
+            const timeTable = {
+            1: "08:10-09:00", 2: "09:10-10:00", 3: "10:20-11:10", 4: "11:20-12:10",
+            5: "12:20-13:10", 6: "13:30-14:20", 7: "14:30-15:20", 8: "15:40-16:30",
+            9: "16:40-17:30", 10: "17:40-18:30",11: "18:40-19:25"};
+            console.log("成功讀取課程：", title, "來自：", deptName);
+            return {
+                uid: idx,
+                raw,
+                dayKey,
+                start,
+                timeTable,
+                span,
+                credit,
+                title,
+                dept: deptName,
+                deptName,
+                teacher,
+                place,
+                subjectCode,
+                gradeLevel,
+                remark
+            };
+        }
+
+        function buildSelectedCourseCell(course, span = 1) {
+            const wrapper = document.createElement("div");
+            wrapper.className = "absolute inset-1.5 rounded-xl bg-white p-2 shadow-sm text-left transition flex flex-col overflow-hidden";
+            wrapper.style.minHeight = `${span * PERIOD_ROW_HEIGHT - 12}px`;
+
+            const closeBtn = document.createElement("button");
+            closeBtn.type = "button";
+            closeBtn.className = "absolute top-1.5 right-1.5 z-10 bg-white/90 text-sm text-gray-500 rounded-full w-5 h-5 flex items-center justify-center shadow-sm hover:bg-red-50 hover:text-red-500 leading-none";
+            closeBtn.textContent = "×";
+            closeBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                removeCourse(course.uid);
+            });
+
+            const content = document.createElement("div");
+            content.className = "relative z-[1] flex flex-col flex-1 min-h-0";
+
+            const title = document.createElement("div");
+            title.className = "font-bold text-blue-800 pr-5 text-lg leading-snug";
+            title.textContent = course.title;
+
+            const meta = document.createElement("div");
+            meta.className = "text-sm mt-1 leading-snug text-gray-600";
+            const deptText = course.deptName ? `【${course.deptName}】` : (course.dept ? `【${course.dept}】` : "");
+            const placeText = course.place ? ` | ${course.place}` : "";
+            meta.textContent = `${deptText}${deptText ? " " : ""}${course.teacher || ""} ${placeText}`;
+
+            const footer = document.createElement("div");
+            footer.className = "mt-auto pt-1";
+
+            if (course.subjectCode) {
+                const subjectCodeEl = document.createElement("div");
+                subjectCodeEl.className = "text-sm text-black font-medium";
+                subjectCodeEl.textContent = course.subjectCode;
+                footer.appendChild(subjectCodeEl);
+            }
+
+            const credit = document.createElement("div");
+            credit.className = "text-sm text-blue-600 font-medium";
+            credit.textContent = `${course.credit} 學分`;
+            footer.appendChild(credit);
+
+            if (course.gradeLevel) {
+                const gradeEl = document.createElement("div");
+                gradeEl.className = "text-sm text-black font-medium";
+                gradeEl.textContent = course.gradeLevel;
+                footer.appendChild(gradeEl);
+            }
+
+            content.appendChild(title);
+            content.appendChild(meta);
+            content.appendChild(footer);
+            wrapper.appendChild(closeBtn);
+            wrapper.appendChild(content);
+            applyRemarkMarkers(wrapper, course.remark, content);
+
+            return wrapper;
+        }
+
+        function renderSchedule() {
+            const tbody = document.getElementById("courseTbody");
+            tbody.innerHTML = "";
+
+            // skipMap: key = `${period}-${dayKey}`，表示該格被 rowspan 覆蓋需略過渲染
+            const skipMap = new Set();
+            // startCells: key 同上，value = { course, span }
+            const startCells = new Map();
+
+            let totalCredits = 0;
+            for (const c of selectedCourses) {
+                if (!Number.isFinite(c.credit)) continue;
+                totalCredits += c.credit;
+
+                if (c.dayKey == null || !Number.isFinite(c.start)) continue;
+                if (c.start < PERIOD_START || c.start > PERIOD_END) continue;
+
+                const actualSpan = Math.min(c.span, PERIOD_END - c.start + 1);
+                const key = `${c.start}-${c.dayKey}`;
+                startCells.set(key, { course: c, span: actualSpan });
+
+                for (let p = c.start + 1; p <= c.start + actualSpan - 1; p++) {
+                    skipMap.add(`${p}-${c.dayKey}`);
+                }
+            }
+
+            document.getElementById("currentCredits").textContent = String(totalCredits);
+
+            for (let period = PERIOD_START; period <= PERIOD_END; period++) {
+                const tr = document.createElement("tr");
+                tr.className = "h-24";
+
+                const periodTd = document.createElement("td");
+                // 左側節次欄位：顯示節次數字與對應時間（時間固定在格子底部，與節數一起置中）
+                periodTd.className = "border bg-[#FFD700] text-center align-middle text-[#444]";
+                const periodWrapper = document.createElement("div");
+                periodWrapper.className = "flex flex-col items-center justify-between h-full py-1";
+                const periodNum = document.createElement("div");
+                periodNum.className = "font-bold";
+                periodNum.textContent = String(period);
+                const periodTime = document.createElement("div");
+                periodTime.className = "mt-1 text-[11px] text-gray-700 whitespace-nowrap";
+                periodTime.textContent = getPeriodTime(period);
+                periodWrapper.appendChild(periodNum);
+                periodWrapper.appendChild(periodTime);
+                periodTd.appendChild(periodWrapper);
+                tr.appendChild(periodTd);
+
+                for (const d of DAYS) {
+                    const cellKey = `${period}-${d.key}`;
+                    if (skipMap.has(cellKey)) continue;
+
+                    const td = document.createElement("td");
+                    td.className = "border p-1";
+
+                    const startInfo = startCells.get(cellKey);
+                    if (startInfo) {
+                        if (startInfo.span > 1) td.rowSpan = startInfo.span;
+                        td.className = "border p-0 align-top bg-[#F2F2F2] relative h-px";
+                        td.appendChild(buildSelectedCourseCell(startInfo.course, startInfo.span));
+                    } else {
+                        // 空白課程格子：莫蘭迪淺灰底，hover 稍微加深
+                        td.className = "border p-1 bg-[#F2F2F2] hover:bg-[#EAEAEA] transition-colors";
+                        td.appendChild(addPickButton(d.key, period));
+                    }
+
+                    tr.appendChild(td);
+                }
+
+                tbody.appendChild(tr);
+            }
+        }
+
+        function openSidebar(dayKey, period) {
+            currentSidebarDayKey = dayKey;
+            currentSidebarPeriod = period;
+
+            const overlay = document.getElementById("sidebarOverlay");
+            const panel = document.getElementById("courseSidebar");
+            const titleEl = document.getElementById("sidebarTitle");
+
+            const day = DAYS.find(d => d.key === dayKey);
+            titleEl.textContent = `${day ? day.label : "未知"} 第 ${period} 節`;
+
+            // 每次開啟側邊欄時預設「全選」
+            activeDeptFilter = new Set(DEPARTMENTS);
+            activeCourseFilter = new Set(COURSE_FILTER_KEYS);
+            syncDeptCheckboxes();
+            syncCourseCheckboxes();
+            renderSidebarCourseList();
+
+            overlay.classList.remove("hidden");
+            requestAnimationFrame(() => {
+                panel.classList.remove("translate-x-full");
+            });
+        }
+
+        function closeSidebar() {
+            const overlay = document.getElementById("sidebarOverlay");
+            const panel = document.getElementById("courseSidebar");
+            panel.classList.add("translate-x-full");
+            setTimeout(() => {
+                overlay.classList.add("hidden");
+            }, 250);
+        }
+
+        function renderSidebarCourseList() {
+            const listEl = document.getElementById("sidebarCourseList");
+            listEl.innerHTML = "";
+
+            if (currentSidebarDayKey == null || currentSidebarPeriod == null) {
+                return;
+            }
+
+            const clickedDay = currentSidebarDayKey;
+            const clickedPeriod = currentSidebarPeriod;
+
+            const availableCourses = allCourses.filter(c =>
+                c.dayKey === clickedDay &&
+                clickedPeriod >= c.start &&
+                clickedPeriod < (c.start + c.span)
+            );
+
+            const matched = availableCourses.filter(c => {
+                const deptName = c.deptName || c.dept || "";
+                if (activeDeptFilter.size === 0) return false;
+                if (!deptName || !activeDeptFilter.has(deptName)) return false;
+                return courseMatchesCourseFilter(c);
+            });
+
+            if (!matched.length) {
+                const empty = document.createElement("p");
+                empty.className = "text-sm text-gray-400";
+                empty.textContent = "此時段目前沒有可加選的課程。";
+                listEl.appendChild(empty);
+                return;
+            }
+
+            matched.forEach(course => {
+                const card = document.createElement("div");
+                card.className = "relative border rounded-lg p-3 pb-2 hover:border-blue-400 transition overflow-hidden";
+
+                const content = document.createElement("div");
+                content.className = "relative z-[1]";
+
+                const titleRow = document.createElement("div");
+                titleRow.className = "flex justify-between items-start gap-2";
+
+                const title = document.createElement("div");
+                title.className = "font-semibold text-gray-800 text-xl";
+                title.textContent = course.title;
+
+                const deptTag = document.createElement("span");
+                deptTag.className = "inline-flex items-center px-3 py-1 rounded-full text-sm text-blue-900 border";
+                const dept = course.deptName || "未標記系所";
+                deptTag.textContent = dept;
+                // 簡單依系所名稱做顏色分組
+                if (dept.includes("不分系")) {
+                    deptTag.classList.add("bg-gray-100", "border-gray-300");
+                } else if (dept.includes("語教") || dept.includes("區社") || dept.includes("諮心")) {
+                    deptTag.classList.add("bg-green-50", "border-green-200", "text-green-700");
+                } else if (dept.includes("美術") || dept.includes("音樂")) {
+                    deptTag.classList.add("bg-pink-50", "border-pink-200", "text-pink-700");
+                } else if (dept.includes("資工") || dept.includes("數位")) {
+                    deptTag.classList.add("bg-blue-50", "border-blue-200", "text-blue-700");
+                } else if (dept.includes("國企") || dept.includes("英語")) {
+                    deptTag.classList.add("bg-yellow-50", "border-yellow-200", "text-yellow-700");
+                } else if (dept.includes("其他") ) {
+                    deptTag.classList.add("bg-black-50",);
+                } else {
+                    deptTag.classList.add("bg-indigo-50", "border-indigo-200", "text-indigo-700");
+                }
+
+                titleRow.appendChild(title);
+                titleRow.appendChild(deptTag);
+
+                const meta = document.createElement("div");
+                meta.className = "mt-1 text-base text-gray-600";
+                const placeText = course.place ? ` | ${course.place}` : "";
+                meta.textContent = `${course.teacher || "未標示老師"}${placeText}`;
+
+                const time = document.createElement("div");
+                time.className = "mt-1 text-base text-gray-500";
+                const startP = course.start;
+                const endP = course.start + course.span - 1;
+                time.textContent = `時段：第 ${startP} - ${endP} 節`;
+
+                let subjectCodeEl = null;
+                if (course.subjectCode) {
+                    subjectCodeEl = document.createElement("div");
+                    subjectCodeEl.className = "mt-0.5 text-base text-black";
+                    subjectCodeEl.textContent = course.subjectCode;
+                }
+
+                const credit = document.createElement("div");
+                credit.className = "mt-0.5 text-base text-orange-500";
+                credit.textContent = `${course.credit} 學分`;
+
+                const btnRow = document.createElement("div");
+                btnRow.className = "mt-2 flex justify-between items-end gap-2";
+
+                const gradeEl = document.createElement("div");
+                gradeEl.className = "text-base text-black shrink-0";
+                gradeEl.textContent = course.gradeLevel || "";
+
+                const pickBtn = document.createElement("button");
+                pickBtn.type = "button";
+                pickBtn.className = "px-4 py-2 text-lg rounded bg-blue-600 text-white hover:bg-blue-700 shrink-0";
+                pickBtn.textContent = "選取";
+                pickBtn.addEventListener("click", () => {
+                    selectCourse(course);
+                });
+
+                btnRow.appendChild(gradeEl);
+                btnRow.appendChild(pickBtn);
+
+                content.appendChild(titleRow);
+                content.appendChild(meta);
+                content.appendChild(time);
+                if (subjectCodeEl) content.appendChild(subjectCodeEl);
+                content.appendChild(credit);
+                content.appendChild(btnRow);
+                card.appendChild(content);
+                applyRemarkMarkers(card, course.remark, content);
+
+                listEl.appendChild(card);
+            });
+        }
+
+        function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+            return Math.max(aStart, bStart) <= Math.min(aEnd, bEnd);
+        }
+
+        function selectCourse(course) {
+            // 衝堂檢測
+            for (const c of selectedCourses) {
+                if (c.dayKey !== course.dayKey) continue;
+                const aStart = c.start;
+                const aEnd = c.start + c.span - 1;
+                const bStart = course.start;
+                const bEnd = course.start + course.span - 1;
+                if (rangesOverlap(aStart, aEnd, bStart, bEnd)) {
+                    alert("衝堂ㄌqwq，客官要不再逛逛看看？");
+                    return;
+                }
+            }
+
+            selectedCourses.push(course);
+            persistSelectedCourses();
+            renderSchedule();
+            closeSidebar();
+        }
+
+        function removeCourse(uid) {
+            selectedCourses = selectedCourses.filter(c => c.uid !== uid);
+            persistSelectedCourses();
+            renderSchedule();
+        }
+
+        function persistSelectedCourses() {
+            try {
+                const uids = selectedCourses.map(c => c.uid);
+                localStorage.setItem("selectedCourseUids", JSON.stringify(uids));
+            } catch {
+                // ignore
+            }
+        }
+
+        function restoreSelectedCoursesFromStorage() {
+            try {
+                const raw = localStorage.getItem("selectedCourseUids");
+                if (!raw) return;
+                const uids = JSON.parse(raw);
+                if (!Array.isArray(uids) || !uids.length) return;
+                const uidSet = new Set(uids);
+                selectedCourses = allCourses.filter(c => uidSet.has(c.uid));
+            } catch {
+                // ignore
+            }
+        }
+
+        function syncDeptCheckboxes() {
+            const container = document.getElementById("deptFilterContainer");
+            if (!container) return;
+            const inputs = container.querySelectorAll("input[type='checkbox'][value]");
+            inputs.forEach(input => {
+                const dept = input.value;
+                input.checked = activeDeptFilter.has(dept);
+            });
+        }
+
+        function syncCourseCheckboxes() {
+            const container = document.getElementById("courseFilterContainer");
+            if (!container) return;
+            const inputs = container.querySelectorAll("input[type='checkbox'][value]");
+            inputs.forEach(input => {
+                input.checked = activeCourseFilter.has(input.value);
+            });
+        }
+
+        function setupCourseFilterUI() {
+            const container = document.getElementById("courseFilterContainer");
+            const selectAllBtn = document.getElementById("courseSelectAllBtn");
+            const clearAllBtn = document.getElementById("courseClearAllBtn");
+            if (!container) return;
+
+            container.innerHTML = "";
+
+            COURSE_FILTER_TYPES.forEach(({ key, color }) => {
+                const label = document.createElement("label");
+                label.className = "inline-flex items-center gap-1.5 cursor-pointer select-none";
+
+                const checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.value = key;
+                checkbox.className = "h-4 w-4 rounded border-gray-300 focus:ring-2 focus:ring-offset-0";
+                checkbox.style.accentColor = color;
+                checkbox.checked = activeCourseFilter.has(key);
+                checkbox.addEventListener("change", (e) => {
+                    if (e.target.checked) {
+                        activeCourseFilter.add(key);
+                    } else {
+                        activeCourseFilter.delete(key);
+                    }
+                    renderSidebarCourseList();
+                });
+
+                const tag = document.createElement("span");
+                tag.className = "inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border";
+                tag.textContent = key;
+                tag.style.color = color;
+                tag.style.borderColor = color;
+                tag.style.backgroundColor = hexToRgba(color, 0.18);
+
+                label.appendChild(checkbox);
+                label.appendChild(tag);
+                container.appendChild(label);
+            });
+
+            if (selectAllBtn) {
+                selectAllBtn.addEventListener("click", () => {
+                    activeCourseFilter = new Set(COURSE_FILTER_KEYS);
+                    syncCourseCheckboxes();
+                    renderSidebarCourseList();
+                });
+            }
+
+            if (clearAllBtn) {
+                clearAllBtn.addEventListener("click", () => {
+                    activeCourseFilter = new Set();
+                    syncCourseCheckboxes();
+                    renderSidebarCourseList();
+                });
+            }
+        }
+
+        function setupDepartmentFilterUI() {
+            const container = document.getElementById("deptFilterContainer");
+            const selectAllBtn = document.getElementById("deptSelectAllBtn");
+            const clearAllBtn = document.getElementById("deptClearAllBtn");
+            if (!container) return;
+
+            container.innerHTML = "";
+
+            DEPARTMENTS.forEach(dept => {
+                const label = document.createElement("label");
+                label.className = "inline-flex items-center space-x-1 cursor-pointer select-none";
+
+                const checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.value = dept;
+                checkbox.className = "h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500";
+                checkbox.checked = activeDeptFilter.has(dept);
+                checkbox.addEventListener("change", (e) => {
+                    if (e.target.checked) {
+                        activeDeptFilter.add(dept);
+                    } else {
+                        activeDeptFilter.delete(dept);
+                    }
+                    renderSidebarCourseList();
+                });
+
+                const span = document.createElement("span");
+                span.className = "truncate text-lg";
+                span.textContent = dept;
+
+                label.appendChild(checkbox);
+                label.appendChild(span);
+                container.appendChild(label);
+            });
+
+            if (selectAllBtn) {
+                selectAllBtn.addEventListener("click", () => {
+                    activeDeptFilter = new Set(DEPARTMENTS);
+                    syncDeptCheckboxes();
+                    renderSidebarCourseList();
+                });
+            }
+
+            if (clearAllBtn) {
+                clearAllBtn.addEventListener("click", () => {
+                    activeDeptFilter = new Set();
+                    syncDeptCheckboxes();
+                    renderSidebarCourseList();
+                });
+            }
+        }
+
+        async function main() {
+            console.log('正在啟動抓取...');
+            // 先渲染空表（確保沒課也有 +加選）
+            renderSchedule();
+
+            try {
+                const spreadsheetId = SPREADSHEET_ID_OR_URL;
+                let globalIdx = 0;
+                const all = [];
+
+                // 逐一抓取各系所分頁，並將當下的 deptName 傳入 normalizeCourse，避免標籤錯置
+                for (const deptName of DEPARTMENTS) {
+                    try {
+                        const rawRows = await fetchSheetRows(spreadsheetId, deptName);
+                        const courses = rawRows
+                            .map(r => normalizeCourse(r, globalIdx++, deptName))
+                            .filter(c => Number.isFinite(c.dayKey) && Number.isFinite(c.start));
+                        all.push(...courses);
+                    } catch (e) {
+                        console.warn("讀取分頁失敗：", deptName, e);
+                    }
+                }
+
+                // 使用 Map 依「課程名稱 + 老師 + 星期 + 開始節次」去重，避免重複課程顯示
+                const dedupMap = new Map();
+                for (const c of all) {
+                    const key = [
+                        c.title || "",
+                        c.teacher || "",
+                        c.dayKey ?? "",
+                        c.start ?? ""
+                    ].join("|");
+                    if (!dedupMap.has(key)) {
+                        dedupMap.set(key, c);
+                    }
+                }
+
+                allCourses = Array.from(dedupMap.values());
+                console.log("載入課程筆數（去重後）：", allCourses.length);
+
+                // 若先前有選課紀錄（或有預設資料已寫入 localStorage），重整後恢復顯示
+                restoreSelectedCoursesFromStorage();
+                renderSchedule();
+            } catch (err) {
+                console.error(err);
+                // 失敗時仍保留空表
+            }
+
+            // 建立系所過濾 Checkbox UI
+            setupDepartmentFilterUI();
+            setupCourseFilterUI();
+
+            // 綁定側邊欄關閉事件
+            const overlay = document.getElementById("sidebarOverlay");
+            const closeBtn = document.getElementById("sidebarCloseBtn");
+            if (overlay) {
+                overlay.addEventListener("click", (e) => {
+                    if (e.target === overlay) {
+                        closeSidebar();
+                    }
+                });
+            }
+            if (closeBtn) {
+                closeBtn.addEventListener("click", () => {
+                    closeSidebar();
+                });
+            }
+        }
+
+        main();
+    </script>
+</body>
+</html>

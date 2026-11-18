@@ -1,0 +1,16 @@
+# Python 暫存檔
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Mac 系統檔案
+.DS_Store
+
+# 虛擬環境
+venv/
+env/
+ENV/
+
+# 機密憑證與資料庫
+credentials.json
+course_data.csv
